@@ -45,8 +45,8 @@ model ApplicationStatusHistory {
   occurredAt     DateTime
   recordedAt     DateTime        @default(now())
 
+  @@unique([applicationId, sourceEventId])
   @@index([applicationId, occurredAt])
-  @@index([sourceEventId])
 }
 
 model NotificationJob {

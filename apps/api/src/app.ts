@@ -4,7 +4,7 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import {
   ApplicationNotFoundError,
-  getApplication,
+  getApplicationForCustomer,
   recordStatusEvent,
 } from "./application-service.js";
 
@@ -29,9 +29,10 @@ export function buildApp(options: BuildAppOptions = {}) {
         return reply.code(401).send({ error: "customer identity is required" });
       }
 
-      const application = await getApplication(
+      const application = await getApplicationForCustomer(
         database,
         request.params.applicationId,
+        customerId,
       );
 
       if (!application) {
@@ -59,12 +60,22 @@ export function buildApp(options: BuildAppOptions = {}) {
       );
 
       try {
-        const application = await recordStatusEvent(
+        const { outcome, application } = await recordStatusEvent(
           database,
           request.params.applicationId,
           parsed.data,
         );
-        return reply.code(202).send({ application });
+        // Distinct signals per DOMAIN.md. A stale event was never applied, so
+        // it is a 409 (not a 200) to avoid implying it took effect.
+        const statusByOutcome = {
+          accepted: 202,
+          duplicate: 200,
+          stale: 409,
+          terminal: 409,
+        } as const;
+        return reply
+          .code(statusByOutcome[outcome])
+          .send({ outcome, application });
       } catch (error) {
         if (error instanceof ApplicationNotFoundError) {
           return reply.code(404).send({ error: "application not found" });

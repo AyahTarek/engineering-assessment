@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { fetchApplication, formatStatus } from "../../../src/api";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,8 @@ export default async function ApplicationPage({
 }) {
   const { applicationId } = await params;
   const application = await fetchApplication(applicationId);
+
+  if (!application) notFound();
 
   return (
     <main className="page-shell">

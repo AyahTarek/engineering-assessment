@@ -125,6 +125,35 @@ h2 {
   padding: 24px;
 }
 
+.state-message {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 32px;
+  text-align: center;
+}
+
+.state-message p {
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.state-message button {
+  background: var(--brand);
+  border: none;
+  border-radius: 7px;
+  color: #fffdf8;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 16px;
+}
+
+.state-message button:hover {
+  background: var(--brand-hover);
+}
+
 .history {
   margin-top: 20px;
 }

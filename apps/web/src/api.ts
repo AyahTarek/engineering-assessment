@@ -5,11 +5,15 @@ const demoCustomerId = process.env.DEMO_CUSTOMER_ID ?? "cus_amina_001";
 
 export async function fetchApplication(
   applicationId: string,
-): Promise<ApplicationView> {
+): Promise<ApplicationView | null> {
   const response = await fetch(`${apiUrl}/v1/applications/${applicationId}`, {
     cache: "no-store",
     headers: { "x-customer-id": demoCustomerId },
   });
+
+  // Missing and not-owned are both 404 by design (see application-service.ts);
+  // the caller renders this as "not found", not as an error.
+  if (response.status === 404) return null;
 
   if (!response.ok) {
     throw new Error(`Application request failed with ${response.status}`);
