@@ -13,13 +13,39 @@ export class ApplicationNotFoundError extends Error {
   }
 }
 
-export type RecordOutcome = "accepted" | "duplicate" | "stale" | "terminal";
+export type RecordOutcome =
+  | "accepted"
+  | "duplicate"
+  | "stale"
+  | "terminal"
+  | "invalid";
 
 // DECLINED and DISBURSED are terminal per DOMAIN.md; enforced directly rather
 // than modelling the ambiguous full transition graph. Typed against
 // ApplicationStatus so a renamed/removed status fails to compile here.
 const TERMINAL_STATUSES: ReadonlySet<ApplicationStatus> =
   new Set<ApplicationStatus>(["DECLINED", "DISBURSED"]);
+
+// The full lifecycle graph from DOMAIN.md. Only these edges are legal; every
+// other pair (backward moves, skipped steps, staying put) is "invalid". Keyed
+// on non-terminal statuses only — TERMINAL_STATUSES is checked first, so a
+// terminal status never reaches this lookup — but Exclude<> still forces a
+// compile error if a new non-terminal status is ever added without an entry.
+type NonTerminalStatus = Exclude<ApplicationStatus, "DECLINED" | "DISBURSED">;
+
+const ALLOWED_TRANSITIONS: Readonly<
+  Record<NonTerminalStatus, ReadonlySet<ApplicationStatus>>
+> = {
+  SUBMITTED: new Set<ApplicationStatus>(["IN_REVIEW", "DECLINED"]),
+  IN_REVIEW: new Set<ApplicationStatus>(["OFFERED", "DECLINED"]),
+  OFFERED: new Set<ApplicationStatus>(["APPROVED", "DECLINED"]),
+  APPROVED: new Set<ApplicationStatus>(["DISBURSED"]),
+};
+
+// Fallback for a status with no entry above (only reachable if the
+// TERMINAL_STATUSES guard is ever removed/reordered) — fails closed as
+// "invalid" instead of throwing on `undefined.has(...)`.
+const NO_TRANSITIONS: ReadonlySet<ApplicationStatus> = new Set();
 
 export interface RecordStatusEventResult {
   outcome: RecordOutcome;
@@ -98,7 +124,10 @@ export async function recordStatusEvent(
 
       if (!application) throw new ApplicationNotFoundError(applicationId);
 
-      // Idempotency is scoped per application, not globally by eventId.
+      // Checked first, before any state-based rule: a retried eventId may
+      // have already advanced current status past what it represents, so
+      // re-validating it against current status would be comparing the
+      // wrong pair. Idempotency is scoped per application, not globally.
       const alreadyRecorded = await tx.applicationStatusHistory.findFirst({
         where: { applicationId, sourceEventId: event.eventId },
       });
@@ -114,10 +143,21 @@ export async function recordStatusEvent(
         !application.lastEventOccurredAt ||
         occurredAt > application.lastEventOccurredAt;
 
-      // A superseded (older) event has no effect: no history, state, or
-      // notification. Audit of "seen but not acted on" belongs in an operator
-      // log (see DESIGN.md), not the customer-facing history.
+      // Checked before transition validity, for the same reason as above: a
+      // stale event's context predates the current status, so current status
+      // is the wrong baseline to validate its edge against. No history,
+      // state, or notification. Audit of "seen but not acted on" belongs in
+      // an operator log (see DESIGN.md), not the customer-facing history.
       if (!isNewer) return "stale";
+
+      // Last gate before mutating: event is new, app is alive, and it's not
+      // superseded, so current status is now a meaningful baseline. Reject an
+      // illegal edge (backward move, skipped step, no-op restate) the same
+      // way as a stale event: no history, state, or notification.
+      const allowedNext =
+        ALLOWED_TRANSITIONS[application.status as NonTerminalStatus] ??
+        NO_TRANSITIONS;
+      if (!allowedNext.has(event.status)) return "invalid";
 
       await tx.applicationStatusHistory.create({
         data: {

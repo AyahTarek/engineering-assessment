@@ -65,13 +65,15 @@ export function buildApp(options: BuildAppOptions = {}) {
           request.params.applicationId,
           parsed.data,
         );
-        // Distinct signals per DOMAIN.md. A stale event was never applied, so
-        // it is a 409 (not a 200) to avoid implying it took effect.
+        // Distinct signals per DOMAIN.md. A stale or invalid-transition event
+        // was never applied, so it is a 409 (not a 200) to avoid implying it
+        // took effect.
         const statusByOutcome = {
           accepted: 202,
           duplicate: 200,
           stale: 409,
           terminal: 409,
+          invalid: 409,
         } as const;
         return reply
           .code(statusByOutcome[outcome])
