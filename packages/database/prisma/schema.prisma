@@ -59,9 +59,10 @@ model NotificationJob {
   attemptCount    Int             @default(0)
   nextAttemptAt   DateTime?
   processedAt     DateTime?
+  deadLetteredAt  DateTime?
   lastError       String?
   createdAt       DateTime        @default(now())
 
-  @@index([processedAt, nextAttemptAt])
+  @@index([processedAt, deadLetteredAt, nextAttemptAt])
   @@index([sourceEventId])
 }
