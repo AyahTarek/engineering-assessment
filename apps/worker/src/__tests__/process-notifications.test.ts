@@ -60,4 +60,74 @@ describe("notification worker", () => {
     expect(storedJob.processedAt).toBeInstanceOf(Date);
     expect(storedJob.attemptCount).toBe(1);
   });
+
+  it("keeps a failed job eligible for retry with backoff", async () => {
+    const sender: NotificationSender = {
+      sendStatusUpdate: vi.fn().mockRejectedValue(new Error("provider down")),
+    };
+
+    const result = await processNotificationBatch(prisma, sender, {
+      info: vi.fn(),
+      error: vi.fn(),
+    });
+
+    expect(result).toEqual({ found: 1, delivered: 0, failed: 1 });
+
+    const storedJob = await prisma.notificationJob.findFirstOrThrow();
+    // Not processed and not dead-lettered => still eligible for retry.
+    expect(storedJob.processedAt).toBeNull();
+    expect(storedJob.deadLetteredAt).toBeNull();
+    expect(storedJob.attemptCount).toBe(1);
+    expect(storedJob.nextAttemptAt).toBeInstanceOf(Date);
+    expect(storedJob.lastError).toBe("provider down");
+  });
+
+  it("dead-letters a job once retries are exhausted", async () => {
+    const sender: NotificationSender = {
+      sendStatusUpdate: vi.fn().mockRejectedValue(new Error("provider down")),
+    };
+    const logger = { info: vi.fn(), error: vi.fn() };
+    // Small policy so the job exhausts on the second attempt.
+    const policy = { maxAttempts: 2, backoffMs: () => 0 };
+
+    await processNotificationBatch(prisma, sender, logger, policy);
+    await processNotificationBatch(prisma, sender, logger, policy);
+
+    const storedJob = await prisma.notificationJob.findFirstOrThrow();
+    expect(storedJob.attemptCount).toBe(2);
+    expect(storedJob.deadLetteredAt).toBeInstanceOf(Date);
+    expect(storedJob.processedAt).toBeNull();
+
+    // A dead-lettered job is no longer picked up by the poller.
+    const followUp = await processNotificationBatch(
+      prisma,
+      sender,
+      logger,
+      policy,
+    );
+    expect(followUp.found).toBe(0);
+  });
+
+  it("preserves lastError as history once a previously failing job goes on to succeed", async () => {
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const policy = { maxAttempts: 5, backoffMs: () => 0 };
+    const sender: NotificationSender = {
+      sendStatusUpdate: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("provider down"))
+        .mockResolvedValueOnce(undefined),
+    };
+
+    await processNotificationBatch(prisma, sender, logger, policy);
+    const afterFailure = await prisma.notificationJob.findFirstOrThrow();
+    expect(afterFailure.lastError).toBe("provider down");
+
+    await processNotificationBatch(prisma, sender, logger, policy);
+    const afterSuccess = await prisma.notificationJob.findFirstOrThrow();
+    // Current health comes from processedAt, not lastError, which is kept
+    // as a record of the last failed attempt rather than cleared on success.
+    expect(afterSuccess.processedAt).toBeInstanceOf(Date);
+    expect(afterSuccess.lastError).toBe("provider down");
+    expect(afterSuccess.attemptCount).toBe(2);
+  });
 });
