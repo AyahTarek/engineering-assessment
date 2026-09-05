@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import {
   ApplicationNotFoundError,
   getApplicationForCustomer,
+  listApplicationsForCustomer,
   recordStatusEvent,
 } from "./application-service.js";
 
@@ -20,6 +21,19 @@ export function buildApp(options: BuildAppOptions = {}) {
   void app.register(cors, { origin: true });
 
   app.get("/health", async () => ({ status: "ok" }));
+
+  app.get("/v1/applications", async (request, reply) => {
+    const customerId = request.headers["x-customer-id"];
+    if (typeof customerId !== "string" || customerId.length === 0) {
+      return reply.code(401).send({ error: "customer identity is required" });
+    }
+
+    const applications = await listApplicationsForCustomer(
+      database,
+      customerId,
+    );
+    return { applications };
+  });
 
   app.get<{ Params: { applicationId: string } }>(
     "/v1/applications/:applicationId",

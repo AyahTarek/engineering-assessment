@@ -108,6 +108,31 @@ export function getApplicationForCustomer(
   return findApplication(database, { id: applicationId, customerId });
 }
 
+export interface ApplicationSummary {
+  id: string;
+  status: ApplicationStatus;
+  updatedAt: string;
+}
+
+// Scoped by customerId; lets a caller (e.g. the web app's homepage) discover
+// which application(s) belong to them instead of a hardcoded id.
+export async function listApplicationsForCustomer(
+  database: PrismaClient,
+  customerId: string,
+): Promise<ApplicationSummary[]> {
+  const applications = await database.loanApplication.findMany({
+    where: { customerId },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, status: true, updatedAt: true },
+  });
+
+  return applications.map((application) => ({
+    id: application.id,
+    status: application.status as ApplicationStatus,
+    updatedAt: application.updatedAt.toISOString(),
+  }));
+}
+
 export async function recordStatusEvent(
   database: PrismaClient,
   applicationId: string,
