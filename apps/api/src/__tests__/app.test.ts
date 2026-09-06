@@ -312,8 +312,11 @@ describe("application API", () => {
       }),
     ]);
 
-    // Exactly one request actually applied the event; the other is a no-op,
-    // whether it lost the race at the pre-check or at the unique constraint.
+    // Exactly one request actually applied the event; the other is a no-op.
+    // Note: SQLite serializes writers, so this mainly regression-tests the
+    // sequential pre-check path, not true multi-writer concurrency (e.g.
+    // Postgres) — the real guarantee against that is the @@unique constraint
+    // on NotificationJob itself (schema.prisma), not this test.
     expect([first.json().outcome, second.json().outcome].sort()).toEqual([
       "accepted",
       "duplicate",
@@ -323,9 +326,6 @@ describe("application API", () => {
         where: { sourceEventId: "race-event" },
       }),
     ).resolves.toBe(1);
-    // NotificationJob has no unique constraint of its own; this proves job
-    // creation is still gated by the history table's unique constraint
-    // inside the same transaction, so a real race can't produce two jobs.
     await expect(
       prisma.notificationJob.count({
         where: { sourceEventId: "race-event" },

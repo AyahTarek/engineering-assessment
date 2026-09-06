@@ -41,7 +41,7 @@ model ApplicationStatusHistory {
   application    LoanApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   status         String
   reason         String?
-  sourceEventId  String?
+  sourceEventId  String
   occurredAt     DateTime
   recordedAt     DateTime        @default(now())
 
@@ -63,6 +63,11 @@ model NotificationJob {
   lastError       String?
   createdAt       DateTime        @default(now())
 
+  // sourceEventId is non-nullable, so this is a real "one job per event"
+  // invariant with no NULL loophole — it holds regardless of transaction
+  // ordering or future writers (seed, replay, admin tools), not just for
+  // the current recordStatusEvent path.
+  @@unique([applicationId, sourceEventId])
   @@index([processedAt, deadLetteredAt, nextAttemptAt])
   @@index([sourceEventId])
 }
