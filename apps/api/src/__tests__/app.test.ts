@@ -291,6 +291,49 @@ describe("application API", () => {
     await app.close();
   });
 
+  it("creates at most one notification job when the same event races concurrently", async () => {
+    const app = buildApp({ database: prisma, logger: false });
+    const payload = {
+      eventId: "race-event",
+      status: "IN_REVIEW",
+      occurredAt: "2026-08-20T09:00:00.000Z",
+    };
+
+    const [first, second] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: "/v1/applications/application-a/status-events",
+        payload,
+      }),
+      app.inject({
+        method: "POST",
+        url: "/v1/applications/application-a/status-events",
+        payload,
+      }),
+    ]);
+
+    // Exactly one request actually applied the event; the other is a no-op,
+    // whether it lost the race at the pre-check or at the unique constraint.
+    expect([first.json().outcome, second.json().outcome].sort()).toEqual([
+      "accepted",
+      "duplicate",
+    ]);
+    await expect(
+      prisma.applicationStatusHistory.count({
+        where: { sourceEventId: "race-event" },
+      }),
+    ).resolves.toBe(1);
+    // NotificationJob has no unique constraint of its own; this proves job
+    // creation is still gated by the history table's unique constraint
+    // inside the same transaction, so a real race can't produce two jobs.
+    await expect(
+      prisma.notificationJob.count({
+        where: { sourceEventId: "race-event" },
+      }),
+    ).resolves.toBe(1);
+    await app.close();
+  });
+
   it("rejects any event once an application is terminal, even with a newer timestamp", async () => {
     const app = buildApp({ database: prisma, logger: false });
 
