@@ -4,9 +4,6 @@ import { fetchMyApplications } from "../src/api";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const data = await fetchMyApplications();
-  console.log(data);
-
   const [mostRecent] = await fetchMyApplications();
   if (!mostRecent) {
     return (
