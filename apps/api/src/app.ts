@@ -7,12 +7,25 @@ import {
   getApplicationForCustomer,
   listApplicationsForCustomer,
   recordStatusEvent,
+  type RecordOutcome,
 } from "./application-service.js";
 
 interface BuildAppOptions {
   database?: PrismaClient;
   logger?: boolean;
 }
+
+// Keyed on RecordOutcome (not inferred from this object's own keys), so
+// adding/renaming an outcome there fails to compile here instead of silently
+// falling through with no HTTP status. A stale or invalid-transition event
+// was never applied, so it is 409 (not 200) to avoid implying it took effect.
+const STATUS_BY_OUTCOME: Readonly<Record<RecordOutcome, number>> = {
+  accepted: 202,
+  duplicate: 200,
+  stale: 409,
+  terminal: 409,
+  invalid: 409,
+};
 
 export function buildApp(options: BuildAppOptions = {}) {
   const database = options.database ?? prisma;
@@ -79,18 +92,8 @@ export function buildApp(options: BuildAppOptions = {}) {
           request.params.applicationId,
           parsed.data,
         );
-        // Distinct signals per DOMAIN.md. A stale or invalid-transition event
-        // was never applied, so it is a 409 (not a 200) to avoid implying it
-        // took effect.
-        const statusByOutcome = {
-          accepted: 202,
-          duplicate: 200,
-          stale: 409,
-          terminal: 409,
-          invalid: 409,
-        } as const;
         return reply
-          .code(statusByOutcome[outcome])
+          .code(STATUS_BY_OUTCOME[outcome])
           .send({ outcome, application });
       } catch (error) {
         if (error instanceof ApplicationNotFoundError) {
