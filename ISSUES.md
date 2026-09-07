@@ -162,7 +162,10 @@ application.
 - **Dead-letter replay endpoint.** Dead-lettered jobs are inspectable via the
   database (`deadLetteredAt` is set, nothing is deleted), but replaying one
   (clearing the marker and resetting `nextAttemptAt`) is not yet exposed via an
-  API/CLI — see DESIGN.md.
+  API/CLI. A CLI would be the quickest way to add this, but a dedicated admin
+  panel is the better fit long-term — replay is a production data mutation
+  that should carry auth and an audit trail, not just a script anyone with
+  DB/CLI access can run — see DESIGN.md.
 
 ## How I verified
 

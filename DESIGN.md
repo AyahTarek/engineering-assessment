@@ -34,6 +34,16 @@ sourceEventId])` (not just an index), and `ApplicationStatusHistory.sourceEventI
   "one job/one history row per event" hold regardless of what writes the row
   in the future (seed, replay, admin tools), not just the current
   `recordStatusEvent` transaction.
+- **Why `type` isn't part of that unique key.** `NotificationJob.type` is
+  always `"APPLICATION_STATUS_CHANGED"` today, so including it would be a
+  no-op for current behavior — but it would weaken the invariant, not
+  strengthen it: a future bug that created a second job for the same event
+  under a different `type` value would then bypass the constraint instead of
+  hitting `P2002`. The real rule is "one job per event," full stop. If a
+  future design deliberately fans one event out to multiple independent jobs
+  (e.g. email + SMS as separately retryable/dead-letterable jobs), that's a
+  different invariant — "one job per event per channel" — and should be a
+  conscious schema change with its own comment, not a quiet key addition.
 - **Ordering by business time.** The immutable history stores every accepted
   event; current state only advances when `occurredAt` is newer than the last
   accepted event, so late/out-of-order deliveries never regress state.
@@ -56,8 +66,11 @@ sourceEventId])` (not just an index), and `ApplicationStatusHistory.sourceEventI
   with exponential backoff and jitter (implemented; jitter is a small addition).
 - **Dead-letter queue.** After `maxAttempts`, jobs are marked `deadLetteredAt` and
   excluded from polling. Operators can inspect them and replay by clearing the
-  dead-letter marker and resetting `nextAttemptAt` (I would expose an internal
-  admin endpoint / CLI for this).
+  dead-letter marker and resetting `nextAttemptAt`. A one-off CLI script could
+  do this, but I'd rather expose it as an internal admin panel: replay is an
+  operator action on production data, and a panel gives you auth, an audit
+  trail of who replayed what and when, and a list/filter view of dead-lettered
+  jobs — a CLI would need all of that re-built or would ship without it.
 - **Provider idempotency.** The provider call carries an idempotency key
   (`sourceEventId`), which is what a _real_ provider's own durable, server-side
   dedup would use to make a crash-after-accept-but-before-persist safe. Our

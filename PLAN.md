@@ -23,7 +23,10 @@
 - **State-machine transition validation** — `recordStatusEvent` now rejects any
   event whose status is not a legal next step from the application's current
   status (per DOMAIN.md's lifecycle diagram), even if its timestamp is newer.
-  Files: `application-service.ts`, `app.ts`.
+  The transition table and terminal-status check are extracted into their own
+  module (`isTerminal`/`canTransition`) so `application-service.ts` only calls
+  them, never touches the underlying tables directly.
+  Files: `apps/api/src/status-transitions.ts`, `application-service.ts`, `app.ts`.
 - **HTTP semantics** — `POST` returns `202` for a newly accepted event, `200`
   with `outcome: "duplicate"` for a retry, and `409` with `outcome: "stale"` or
   `"invalid"` for a superseded or illegal transition.
@@ -61,6 +64,14 @@
   customer other than the one it was originally written for.
   Files: `application-service.ts`, `app.ts`, `apps/web/src/api.ts`,
   `apps/web/app/page.tsx`.
+- **Cohesion cleanups (no behavior change).** `app.ts`'s outcome -> HTTP status
+  map is now a module-level `STATUS_BY_OUTCOME` typed as
+  `Record<RecordOutcome, number>`, so an outcome added/renamed in
+  `application-service.ts` fails to compile here instead of silently falling
+  through with no status code. The worker's tuning knobs (`defaultRetryPolicy`,
+  `DEFAULT_CLAIM_VISIBILITY_MS`) moved out of `process-notifications.ts` into
+  `apps/worker/src/config.ts`, separating them from the batch-processing
+  control flow that reads them.
 
 ## How I verified
 
@@ -106,7 +117,10 @@ Test counts: 14 API (HTTP) + 2 API (service unit) + 7 worker
 
 - Retry backoff has no jitter; multiple failing jobs can retry in lockstep.
 - `x-customer-id` is still a demo stand-in for a real authenticated session.
-- Dead-letter replay is not yet exposed via an endpoint/CLI (design in DESIGN.md).
+- Dead-letter replay is not yet exposed via an endpoint/CLI (design in
+  DESIGN.md). A CLI could do it, but a dedicated admin panel is the better
+  fit — it's a production data mutation that should carry auth and an audit
+  trail, not just a script.
 - The claim visibility timeout (`DEFAULT_CLAIM_VISIBILITY_MS`) is a fixed
   constant, not derived from actual observed processing time; if it genuinely
   elapses mid-send, the job **is** sent twice by two workers — the ownership
@@ -121,7 +135,8 @@ Test counts: 14 API (HTTP) + 2 API (service unit) + 7 worker
 2. Move to Postgres + `SELECT ... FOR UPDATE SKIP LOCKED` (or a broker) for
    real concurrent claiming — a throughput upgrade, not a correctness fix;
    correctness is already covered by the atomic claim.
-3. Add an internal admin endpoint/CLI to inspect and replay dead-lettered jobs,
-   plus an operator-only log for "seen but not applied" (stale/invalid) events.
+3. Add an internal admin panel (not just a CLI) to inspect and replay
+   dead-lettered jobs with auth and an audit trail, plus an operator-only log
+   for "seen but not applied" (stale/invalid) events.
 4. Replace the demo identity header with real authentication on the customer API
    and authenticate the partner ingress (mTLS/HMAC).
