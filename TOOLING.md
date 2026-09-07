@@ -4,15 +4,18 @@
 
 - **GitHub Copilot (agent mode) — models:** Claude Opus 4.8, Claude Sonnet 5
 - **Cursor**
+- **ChatGPT** — used as a supplementary sounding board alongside the
+  Copilot/Cursor implementation-and-review loop, for illustrating and
+  clarifying/visualizing concepts and reasoning rather than for implementation.
 
-  Used as a pair, not just one model in isolation: one model/session implemented
-  the fix, then a second, different model acted as an **LLM-as-a-Judge**,
-  independently reviewing the first's changes and claims (e.g. state-machine
-  check ordering, idempotency scope, concurrent-worker claiming) rather than
-  trusting a single model's self-assessment. Every such review was treated as
-  a claim to verify, not a fact — I re-read the actual code/schema for each
-  point raised, confirmed which parts were real gaps versus already-covered or
-  overstated, and only then decided to fix, document, or dismiss it.
+Used as a pair, not just one model in isolation: one model/session implemented
+the fix, then a second, different model acted as an **LLM-as-a-Judge**,
+independently reviewing the first's changes and claims (e.g. state-machine
+check ordering, idempotency scope, concurrent-worker claiming) rather than
+trusting a single model's self-assessment. Every such review was treated as
+a claim to verify, not a fact — I re-read the actual code/schema for each
+point raised, confirmed which parts were real gaps versus already-covered or
+overstated, and only then decided to fix, document, or dismiss it.
 
 ### How I used it
 
@@ -65,6 +68,14 @@
   `maxAttempts` to confirm the job is dead-lettered and excluded from further
   polling.
 - **Customer switching.** Used the `DEMO_CUSTOMER_ID` env var to switch between seeded customers, matching this demo's actual mechanism for simulating a signed-in customer (a real auth session, in production). To make a switch persist across restarts rather than only for a single in-memory run, I set the value directly in the app's `.env` file (instead of passing it inline on the command line) and restarted the dev server so the new value was picked up.
+- **Prisma Studio.** Used for direct database inspection/manipulation (`pnpm
+db:studio`) during manual end-to-end smoke testing, outside of the seed
+  script — e.g. checking rows written by Postman-driven status events, and
+  manually adjusting `claimedAt`/`nextAttemptAt` to force retry/reclaim paths.
+- **Web UI / money formatting.** While driving status events through Postman,
+  loaded the corresponding application page in the browser and visually
+  confirmed `requestedAmountCents` renders correctly as EGP currency and the
+  status badge reflects the latest accepted event.
 
 ## Other tools
 
