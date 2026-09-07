@@ -108,6 +108,81 @@ describe("notification worker", () => {
     expect(followUp.found).toBe(0);
   });
 
+  it("prevents two concurrent workers from delivering the same job twice", async () => {
+    const sendStatusUpdate = vi.fn().mockResolvedValue(undefined);
+    const sender: NotificationSender = { sendStatusUpdate };
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    // Simulates two worker processes polling at the same time.
+    const [first, second] = await Promise.all([
+      processNotificationBatch(prisma, sender, logger),
+      processNotificationBatch(prisma, sender, logger),
+    ]);
+
+    // Only the worker that wins the atomic claim calls the provider; the
+    // loser's claim UPDATE matches zero rows and it skips the job.
+    expect(sendStatusUpdate).toHaveBeenCalledTimes(1);
+    expect(first.delivered + second.delivered).toBe(1);
+
+    const storedJob = await prisma.notificationJob.findFirstOrThrow();
+    expect(storedJob.processedAt).toBeInstanceOf(Date);
+    expect(storedJob.attemptCount).toBe(1);
+  });
+
+  it("does not count a delivery as clean if its claim was stolen mid-send", async () => {
+    const logger = { info: vi.fn(), error: vi.fn() };
+    let sendCount = 0;
+    const sender: NotificationSender = {
+      sendStatusUpdate: vi.fn(async () => {
+        sendCount += 1;
+        if (sendCount === 1) {
+          // Simulate the visibility window elapsing and another worker
+          // reclaiming this job while our own send is still in flight.
+          await prisma.notificationJob.updateMany({
+            where: { sourceEventId: "worker-event-1" },
+            data: { claimedAt: new Date() },
+          });
+        }
+      }),
+    };
+
+    const result = await processNotificationBatch(prisma, sender, logger);
+
+    // The send already happened (that can't be undone), but since another
+    // worker holds the lease by the time we try to finish, this must not be
+    // reported as our own clean, exclusive delivery.
+    expect(result.delivered).toBe(0);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("lost its claim before finishing"),
+    );
+  });
+
+  it("reclaims a job whose claim went stale, e.g. a crashed worker", async () => {
+    // Simulate a worker that claimed the job long ago and never finished.
+    await prisma.notificationJob.updateMany({
+      where: { sourceEventId: "worker-event-1" },
+      data: { claimedAt: new Date(Date.now() - 120_000) },
+    });
+
+    const sender: NotificationSender = {
+      sendStatusUpdate: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    // A 60s visibility window makes a two-minute-old claim reclaimable.
+    const result = await processNotificationBatch(
+      prisma,
+      sender,
+      logger,
+      undefined,
+      60_000,
+    );
+
+    expect(result).toEqual({ found: 1, delivered: 1, failed: 0 });
+    const storedJob = await prisma.notificationJob.findFirstOrThrow();
+    expect(storedJob.processedAt).toBeInstanceOf(Date);
+  });
+
   it("preserves lastError as history once a previously failing job goes on to succeed", async () => {
     const logger = { info: vi.fn(), error: vi.fn() };
     const policy = { maxAttempts: 5, backoffMs: () => 0 };

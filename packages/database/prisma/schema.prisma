@@ -58,6 +58,7 @@ model NotificationJob {
   payload         String
   attemptCount    Int             @default(0)
   nextAttemptAt   DateTime?
+  claimedAt       DateTime?
   processedAt     DateTime?
   deadLetteredAt  DateTime?
   lastError       String?
@@ -68,6 +69,6 @@ model NotificationJob {
   // ordering or future writers (seed, replay, admin tools), not just for
   // the current recordStatusEvent path.
   @@unique([applicationId, sourceEventId])
-  @@index([processedAt, deadLetteredAt, nextAttemptAt])
+  @@index([processedAt, deadLetteredAt, claimedAt, nextAttemptAt])
   @@index([sourceEventId])
 }
